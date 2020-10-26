@@ -7,148 +7,264 @@ import os
 
 from OCC.Core.BRep import BRep_Builder
 from OCC.Core.BRepTools import breptools_Read
-from OCC.Core.TopoDS import TopoDS_Shape
+from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Compound
 from OCC.Core.TopAbs import *
-from OCC.Core.gp import gp_Pln, gp_Dir, gp_Pnt
+from OCC.Core.gp import gp_Pln, gp_Dir, gp_Pnt, gp_Vec
 from OCC.Core.BOPAlgo import BOPAlgo_Splitter
+from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Section
 from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_MakeOffset
-from OCC.Core.BRepAdaptor import BRepAdaptor_Surface
+from OCC.Core.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
 from OCC.Core.TopExp import TopExp_Explorer
-from OCC.Core.GeomAbs import GeomAbs_Arc, GeomAbs_Intersection, GeomAbs_OffsetCurve, GeomAbs_Plane
+from OCC.Core.GeomAbs import *
+# from OCC.Core.Geom2d import *
+from OCC.Core.ShapeAnalysis import ShapeAnalysis_Curve, ShapeAnalysis_Wire
+from OCC.Core.Geom import *
+from OCC.Core.GeomConvert import *
+from OCC.Core.Convert import *
 
+from OCC.Display.backend import get_qt_modules
 from OCC.Display.SimpleGui import init_display
 
 from OCC.Extend.ShapeFactory import get_aligned_boundingbox
-from OCC.Extend.TopologyUtils import TopologyExplorer
+from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
 from OCC.Extend.DataExchange import read_step_file
 
+# initialize display
+print('Initializing display')
+display, start_display, add_menu, add_function_to_menu = init_display("qt-pyqt5")
+QtCore, QtGui, QtWidgets, QtOpengl = get_qt_modules()
 
-def drange(start, stop, step):
-    ''' mimic numpy arange method for float lists
-    '''
-    float_list = []
-    r = start
-    while r <= stop-step:
-        float_list.append(r)
-        r += step
-    return float_list
+from OCC.Display.qtDisplay import qtViewer3d
 
-def make_planes(li):
-    # Create Plane defined by a point and the perpendicular direction
-    slices = []
-    for z in li:
-        #print 'slicing index:', z, 'sliced by process:', os.getpid()
-        plane = gp_Pln(gp_Pnt(0., 0., z), gp_Dir(0., 0., 1.))
-        face = BRepBuilderAPI_MakeFace(plane).Shape()
-        # add tuple to result
-        slices.append(face)
-    return slices
+
+# when selecting a shape, print details, and gcode representation
+def on_select(shapes):
+  if len(shapes) < 1:
+    return
+  s = shapes[0]
+
+  if s.ShapeType() == TopAbs_EDGE:
+    tmp = BRepAdaptor_Curve(s)
+    if tmp.GetType() == GeomAbs_Line:
+      t = tmp.Line()
+      start_point = tmp.Value(tmp.FirstParameter())
+      end_point = tmp.Value(tmp.LastParameter())
+      gcode = 'G01 X{0:.6f} Y{0:.6f}'.format(end_point.X(), end_point.Y())
+      print("line: %.6f, %.6f, %.6f, %.6f" % (start_point.X(), start_point.Y(), end_point.X(), end_point.Y()))
+      print(gcode)
+
+    elif tmp.GetType() == GeomAbs_Circle:
+      t = tmp.Circle()
+      start_point = tmp.Value(tmp.FirstParameter())
+      end_point = tmp.Value(tmp.LastParameter())
+      center_point = t.Location()
+
+      # make two line segments, both from the centerpoint, and one to each of the endpoints
+      # the cross product of the lines determines the direction. positive = CCW, negative = CW
+      # assume for now the arc is in the XY plane, so only check the sign of z
+      # assume clockwise for now
+      # center format arc
+      v1 = gp_Vec(center_point, start_point)
+      v2 = gp_Vec(center_point, end_point)
+
+      # angle > 0 if acute, < 0 if obtuse
+      angle = v1.AngleWithRef(v2, gp_Vec(0,0,1))
+      # use cross product to determine direction
+      v1.Cross(v2)
+      v1 *= angle
+      # TODO: verify
+      CCW = True if v1.Z() > 0 else False
+      
+      gcode = "G0{0} X{1:.6f} Y{2:.6f} I{3:.6f} J{4:.6f}".format(2 if CCW else 3, end_point.X(), end_point.Y(), 
+        center_point.X() - start_point.X(), center_point.Y() - start_point.Y())
+      print("circle: start (%.6f, %.6f), end (%.6f, %.6f), center (%.6f, %.6f), radius %.6f" % (start_point.X(), start_point.Y(), end_point.X(), end_point.Y(), 
+        center_point.X(), center_point.Y(), t.Radius()))
+
+      print(gcode)
+    elif tmp.GetType() == GeomAbs_Ellipse:
+      t = tmp.Ellipse()
+      x = t.XAxis()
+      y = t.YAxis()
+      print("ellipse")
+    elif tmp.GetType() == GeomAbs_Hyperbola:
+      t = tmp.Hyperbola()
+      print("hyperbola")
+    elif tmp.GetType() == GeomAbs_Parabola:
+      t = tmp.Parabola()
+      print("parabola")
+    elif tmp.GetType() == GeomAbs_BezierCurve:
+      t = tmp.Bezier()
+      print("bezier")
+    elif tmp.GetType() == GeomAbs_BSplineCurve:
+      t = tmp.BSpline()
+      print("bspline")
+    elif tmp.GetType() == GeomAbs_OffsetCurve:
+      t = tmp.OffsetCurve()
+      print("offset")
+    elif tmp.GetType() == GeomAbs_OtherCurve:
+      print("other")
+
+def get_viewer():
+  app = QtWidgets.QApplication.instance()
+  if not app:
+    app = QtWidgets.QApplication(sys.argv)
+  widgets = app.topLevelWidgets()
+  for w in widgets:
+    if hasattr(w, "_menus"):
+      viewer = w.findChild(qtViewer3d, "qt_viewer_3d")
+      return viewer
+
+
+def wire_gcode(wire, display):
+  for edge in WireExplorer(wire).ordered_edges():
+    tmp = BRepAdaptor_Curve(edge)
+    # get underlying curve
+    c, start, end = BRep_Tool.Curve(edge)
+    # trim curve
+    curve = Geom_TrimmedCurve(c, start, end)
+
+    # display individual curve
+    display.DisplayShape(curve, update=False)
+    
+
+
+
 
 def make_offsets(face, num, distance):
-    offset = BRepOffsetAPI_MakeOffset(face, GeomAbs_Arc, False)
+  offset = BRepOffsetAPI_MakeOffset(face, GeomAbs_Arc, False)
+  # add all wires to offset algo
+  for w in TopologyExplorer(face).wires():
+    offset.AddWire(w)
+  result = []
+  # perform offsets
+  for i in range(num):
+    offset.Perform(-1 * distance * i)
+    if offset.IsDone():
+      # display.DisplayShape(offset.Shape(), update=True)
+      result.append(offset.Shape())
 
-    for w in TopologyExplorer(face).wires():
-        offset.AddWire(w)
-    result = []
-    
-    for i in range(num):
-        offset.Perform(-1 * distance * i)
-        if offset.IsDone():
-            result.append(offset.Shape())
-
-    return result
-
-def select_planes(solid, z):
-
-    result = []
-
-    # all face planes should be facing downward, parallel to XY plane
-    d = gp_Dir(0., 0., -1.)
-
-    for f in TopologyExplorer(solid).faces():
-        surf = BRepAdaptor_Surface(f, True)
-        if surf.GetType() != GeomAbs_Plane:
-            continue
-        pln = surf.Plane()
-        location = pln.Location()
-        normal = pln.Axis().Direction()
-
-        if location.Z() in z and d.IsParallel(normal, 0.1):
-            print("adding face")
-            result.append(f)
-        
-
-    return result
+  return result
 
 
-def slice(shape, n_procs, compare_by_number_of_processors=False):
-    center, [dx, dy, dz], box_shp = get_aligned_boundingbox(shape)
-    z_min = center.Z() - dz / 2
-    z_max = center.Z() + dz / 2
+def find_faces(solid, z):
+  result = []
+  # downward-facing XY plane
+  d = gp_Dir(0., 0., -1.)
+  # loop over all faces (only faces)
+  for f in TopologyExplorer(solid).faces():
+    surf = BRepAdaptor_Surface(f, True)
+    # skip non-planar faces
+    if surf.GetType() != GeomAbs_Plane:
+      continue
+    # get surface attributes
+    pln = surf.Plane()
+    location = pln.Location()
+    normal = pln.Axis().Direction()
+    # if face is reversed, reverse the surface normal
+    if f.Orientation() == TopAbs_REVERSED:
+      normal.Reverse()
+    # add face if it's parallel (opposite) and coincident with a slicing plane
+    if location.Z() in z and d.IsEqual(normal, 0.1):
+      result.append(f)
 
-    # slice height in mm
-    slice_height = 1
-    # number of shells (offsets)
-    num_shells = 3
-    # distance between offsets
-    shell_thickness = 0.4
+  return result
 
-    # dictionary of slicing planes, key = z height, value = slicing plane
-    z = drange(z_min, z_max, slice_height);
+def arange(start, end, diff):
+  result = [start]
+  while result[-1] < end:
+    result.append(result[-1] + diff)
+  return result
 
-    splitter = BOPAlgo_Splitter()
-    splitter.AddArgument(shape)
-    for p in make_planes(z):
-        # add slice to splitter algo
-        splitter.AddTool(p)
 
-    init_time = time.time()  # for total time computation
+def slice(shape):
+  # keep track of time for perf
+  init_time = time.time()
+  # get the axis-aligned bounding box and dimensions of shape
+  center, [dx, dy, dz], box_shp = get_aligned_boundingbox(shape)
+  # get maximum z coordinate
+  z_max = center.Z() + dz / 2
+  # slice height in mm
+  slice_height = 1 # 0.3
+  # number of shells (offsets)
+  num_shells = 3
+  # distance between offsets
+  shell_thickness = 0.4
+  # list of slicing plane heights
+  # z_list = [i * slice_height for i in range(int(z_max / slice_height) + 1)]
+  # splitter function
+  splitter = BOPAlgo_Splitter()
+  splitter.SetRunParallel(True)
+  splitter.SetFuzzyValue(0.001)
+  splitter.AddArgument(shape)
+  # loop over slicing planes
+  planes = {}  
+  for z in arange(0, z_max, slice_height):
+    # create slicing plane
+    plane = gp_Pln(gp_Pnt(0., 0., z), gp_Dir(0., 0., 1.))
+    face = BRepBuilderAPI_MakeFace(plane).Shape()
+    # add slicing plane (face) to dict
+    planes[z] = face
+    # add slicing plane to splitter algo
+    splitter.AddTool(face)
 
-    splitter.Perform()
+  # split the shape
+  splitter.Perform()
+  # record the time spent
+  split_time = time.time()
+  # get the solid slices from the result
+  exp = TopExp_Explorer(splitter.Shape(), TopAbs_SOLID)
+  faces = []
+  while exp.More():
+    faces.extend(find_faces(exp.Current(), planes.keys()))
+    exp.Next()
+  search_time = time.time()
+  # offset wires
+  print('offsetting wires')
+  offset_wires = []
+  # loop over faces
+  for f in faces:
+    # make offsets of all wires in face
+    offset_wires.append(make_offsets(f, num_shells, shell_thickness))
 
-    display, start_display, add_menu, add_function_to_menu = init_display()
-#    print('displaying original shape')
-#    display.DisplayShape(shape, update=True)
-    print('finding faces')
-    exp = TopExp_Explorer(splitter.Shape(), TopAbs_SOLID)
-    faces = []
-    while exp.More():
-        faces.extend(select_planes(exp.Current(), z))
-#        display.DisplayShape(exp.Current(), update=True)
-        exp.Next();
+  offset_time = time.time()
 
-    print('offsetting wires')
-    offset_wires = []
-    for f in faces:
-        offset_wires.extend(make_offsets(f, num_shells, shell_thickness))
+  #for f in offset_wires:
+  #  print(f)
 
-    print('displaying offsets')
-    for w in offset_wires:
-        display.DisplayShape(w, update=True)
 
-    # update viewer when all is added:
-    display.Repaint()
-    total_time = time.time() - init_time
-    print("%s necessary to perform slice with %s processor(s)." % (total_time, n_procs))
-    start_display()
+  print('displaying offsets')
+  for li in offset_wires:
+    for w in li:
+      # for some reason, some of the wires are TopoAbs_Compound(s)
+      if(w.ShapeType() == TopAbs_COMPOUND):
+        for tmp in TopologyExplorer(w).wires():
+          wire_gcode(tmp, display)
+          # display.DisplayShape(w, update=True)
+      else:
+        wire_gcode(w, display)
+        # display.DisplayShape(w, update=True)
+
+  # update viewer when all is added:
+  display.Repaint()
+  current_time = time.time()
+  print('Splitting time: ', split_time - init_time)
+  print('Searching time: ', search_time - split_time)
+  print('Offsetting time: ', offset_time - split_time)
+  print('Display time: ', current_time - offset_time)
+  print('Total time: ', current_time - init_time)
+  viewer = get_viewer()
+  viewer.sig_topods_selected.connect(on_select)
+  start_display()
+
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        sys.exit(1)
-    if not os.path.isfile(sys.argv[1]):
-        sys.exit(1)
-    
+  if len(sys.argv) < 2:
+    sys.exit(1)
+  if not os.path.isfile(sys.argv[1]):
+    sys.exit(1)
 
-    shape = read_step_file(sys.argv[1])
-    # use compare_by_number_of_processors=True to see speed up
-    # per number of processor added
-    try:
-        nprocs = multiprocessing.cpu_count()
-    except Exception as ex:  # travis fails to run cpu_count
-        print(ex)
-        nprocs = 1
-    except SystemExit:
-        pass
-    slice(shape, nprocs, compare_by_number_of_processors=False)
+  shape = read_step_file(sys.argv[1])
+
+  slice(shape)
