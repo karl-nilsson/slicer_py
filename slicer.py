@@ -4,16 +4,18 @@ import time
 import sys
 import multiprocessing
 import os
+import math
+from collections import defaultdict
 
 from OCC.Core.BRep import BRep_Builder
 from OCC.Core.BRepTools import breptools_Read
 from OCC.Core.TopoDS import TopoDS_Shape, TopoDS_Compound
 from OCC.Core.TopAbs import *
-from OCC.Core.gp import gp_Pln, gp_Dir, gp_Pnt, gp_Vec
+from OCC.Core.gp import *
 from OCC.Core.BOPAlgo import BOPAlgo_Splitter
 from OCC.Core.BRep import BRep_Tool
 from OCC.Core.BRepAlgoAPI import BRepAlgoAPI_Section
-from OCC.Core.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+from OCC.Core.BRepBuilderAPI import *
 from OCC.Core.BRepOffsetAPI import BRepOffsetAPI_MakeOffset
 from OCC.Core.BRepAdaptor import BRepAdaptor_Surface, BRepAdaptor_Curve
 from OCC.Core.TopExp import TopExp_Explorer
@@ -38,6 +40,17 @@ QtCore, QtGui, QtWidgets, QtOpengl = get_qt_modules()
 
 from OCC.Display.qtDisplay import qtViewer3d
 
+def o(shape):
+  if shape.Orientation() == TopAbs_FORWARD:
+    return 'FORWARD'
+  elif shape.Orientation() == TopAbs_REVERSED:
+    return 'REVERSED'
+  elif shape.Orientation() == TopAbs_INTERNAL:
+    return 'INTERNAL'
+  elif shape.Orientation() == TopAbs_External:
+    return 'EXTERNAL'
+  
+
 
 # when selecting a shape, print details, and gcode representation
 def on_select(shapes):
@@ -46,20 +59,37 @@ def on_select(shapes):
   s = shapes[0]
 
   if s.ShapeType() == TopAbs_EDGE:
+    if s.Orientation() == TopAbs_FORWARD:
+      print('FORWARD')
+    else:
+      print('REVERSED')
+
     tmp = BRepAdaptor_Curve(s)
+
+    # display start and endpoints of curve
+    start_point = tmp.Value(tmp.FirstParameter())
+    end_point = tmp.Value(tmp.LastParameter())
+
+    if s.Orientation() == TopAbs_FORWARD:
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(start_point).Vertex(), "BLUE")
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(end_point).Vertex(), "RED")
+    else:
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(start_point).Vertex(), "RED")
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(end_point).Vertex(), "BLUE")
+
+
     if tmp.GetType() == GeomAbs_Line:
       t = tmp.Line()
-      start_point = tmp.Value(tmp.FirstParameter())
-      end_point = tmp.Value(tmp.LastParameter())
-      gcode = 'G01 X{0:.6f} Y{0:.6f}'.format(end_point.X(), end_point.Y())
-      print("line: %.6f, %.6f, %.6f, %.6f" % (start_point.X(), start_point.Y(), end_point.X(), end_point.Y()))
-      print(gcode)
+      gcode = f'G01 X{end_point.X():.6f} Y{end_point.Y():.6f}'
+      print(f'line: ({start_point.X():.6f}, {start_point.Y():.6f}) → ({end_point.X():.6f}, {end_point.Y():.6f})')
+      # print(gcode)
+      print(f'line parameters: {tmp.FirstParameter():.6f}, {tmp.LastParameter():.6f}')
+
 
     elif tmp.GetType() == GeomAbs_Circle:
       t = tmp.Circle()
-      start_point = tmp.Value(tmp.FirstParameter())
-      end_point = tmp.Value(tmp.LastParameter())
       center_point = t.Location()
+
 
       # make two line segments, both from the centerpoint, and one to each of the endpoints
       # the cross product of the lines determines the direction. positive = CCW, negative = CW
@@ -81,8 +111,9 @@ def on_select(shapes):
         center_point.X() - start_point.X(), center_point.Y() - start_point.Y())
       print("circle: start (%.6f, %.6f), end (%.6f, %.6f), center (%.6f, %.6f), radius %.6f" % (start_point.X(), start_point.Y(), end_point.X(), end_point.Y(), 
         center_point.X(), center_point.Y(), t.Radius()))
+      print("circle parameters: %.6f, %.6f" % (tmp.FirstParameter() / math.pi, tmp.LastParameter() / math.pi))
 
-      print(gcode)
+      # print(gcode)
     elif tmp.GetType() == GeomAbs_Ellipse:
       t = tmp.Ellipse()
       x = t.XAxis()
@@ -117,19 +148,30 @@ def get_viewer():
       return viewer
 
 
-def wire_gcode(wire, display):
+def wire_gcode(wire):
+  print(f'Wire Orientation: {o(wire)}')
+  if wire.Orientation() == TopAbs_REVERSED:
+    wire.Reverse()
+
   for edge in WireExplorer(wire).ordered_edges():
+    print(f'Edge Orientation: {o(edge)}')
     tmp = BRepAdaptor_Curve(edge)
     # get underlying curve
     c, start, end = BRep_Tool.Curve(edge)
-    # trim curve
-    curve = Geom_TrimmedCurve(c, start, end)
+    # display start and endpoints of curve
+    start_point = tmp.Value(tmp.FirstParameter())
+    end_point = tmp.Value(tmp.LastParameter())
+
+    if edge.Orientation() == TopAbs_FORWARD:
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(start_point).Vertex(), "BLUE")
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(end_point).Vertex(), "RED")
+    else:
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(start_point).Vertex(), "RED")
+      display.DisplayColoredShape(BRepBuilderAPI_MakeVertex(end_point).Vertex(), "BLUE")
 
     # display individual curve
-    display.DisplayShape(curve, update=False)
-    
-
-
+    display.DisplayShape(edge, update=True)
+    time.sleep(1)
 
 
 def make_offsets(face, num, distance):
@@ -148,10 +190,11 @@ def make_offsets(face, num, distance):
   return result
 
 
-def find_faces(solid, z):
-  result = []
+def find_faces(solid):
+  # search the solid for the bottom-most horizontal planes
+  result = defaultdict(list)
   # downward-facing XY plane
-  d = gp_Dir(0., 0., -1.)
+  d = gp.DZ().Reversed()
   # loop over all faces (only faces)
   for f in TopologyExplorer(solid).faces():
     surf = BRepAdaptor_Surface(f, True)
@@ -162,14 +205,28 @@ def find_faces(solid, z):
     pln = surf.Plane()
     location = pln.Location()
     normal = pln.Axis().Direction()
+
     # if face is reversed, reverse the surface normal
     if f.Orientation() == TopAbs_REVERSED:
       normal.Reverse()
-    # add face if it's parallel (opposite) and coincident with a slicing plane
-    if location.Z() in z and d.IsEqual(normal, 0.1):
-      result.append(f)
 
-  return result
+    # add face if it's parallel (opposite) and coincident with a slicing plane
+    if d.IsEqual(normal, 0.1):
+      result[location.Z()].append(f)
+      # display the face
+      # display.DisplayShape(f, update=True)
+      # display the face normal
+      # display.DisplayVector(gp_Vec(normal), location, update=True)
+
+  # sort the dict by keys (z-height), and return the lowest
+  lowest = sorted(result.keys())[0]
+
+  for f in result[lowest]:
+    print(f'z: {lowest}, orientation: {"FORWARD" if f.Orientation() == TopAbs_FORWARD else "REVERSED"}')
+  # return all faces associated with the lowest value
+  print(f'number of faces: {len(result[lowest])}')
+
+  return result[lowest]
 
 def arange(start, end, diff):
   result = [start]
@@ -186,7 +243,7 @@ def slice(shape):
   # get maximum z coordinate
   z_max = center.Z() + dz / 2
   # slice height in mm
-  slice_height = 1 # 0.3
+  slice_height = 2 # 0.3
   # number of shells (offsets)
   num_shells = 3
   # distance between offsets
@@ -202,7 +259,7 @@ def slice(shape):
   planes = {}  
   for z in arange(0, z_max, slice_height):
     # create slicing plane
-    plane = gp_Pln(gp_Pnt(0., 0., z), gp_Dir(0., 0., 1.))
+    plane = gp_Pln(gp_Pnt(0., 0., z), gp.DZ())
     face = BRepBuilderAPI_MakeFace(plane).Shape()
     # add slicing plane (face) to dict
     planes[z] = face
@@ -217,34 +274,29 @@ def slice(shape):
   exp = TopExp_Explorer(splitter.Shape(), TopAbs_SOLID)
   faces = []
   while exp.More():
-    faces.extend(find_faces(exp.Current(), planes.keys()))
+    faces.extend(find_faces(exp.Current()))
     exp.Next()
   search_time = time.time()
+  # display.EraseAll()
   # offset wires
   print('offsetting wires')
-  offset_wires = []
+  wires = []
   # loop over faces
   for f in faces:
+    # display.DisplayShape(f, update=False)
     # make offsets of all wires in face
-    offset_wires.append(make_offsets(f, num_shells, shell_thickness))
+    # wires.append(make_offsets(f, num_shells, shell_thickness))
+    z = TopExp_Explorer(f, TopAbs_WIRE)
+    while z.More():
+      wires.append(z.Current())
+      z.Next()
 
   offset_time = time.time()
 
-  #for f in offset_wires:
-  #  print(f)
-
 
   print('displaying offsets')
-  for li in offset_wires:
-    for w in li:
-      # for some reason, some of the wires are TopoAbs_Compound(s)
-      if(w.ShapeType() == TopAbs_COMPOUND):
-        for tmp in TopologyExplorer(w).wires():
-          wire_gcode(tmp, display)
-          # display.DisplayShape(w, update=True)
-      else:
-        wire_gcode(w, display)
-        # display.DisplayShape(w, update=True)
+  for w in wires:
+    wire_gcode(w)
 
   # update viewer when all is added:
   display.Repaint()
@@ -266,5 +318,7 @@ if __name__ == '__main__':
     sys.exit(1)
 
   shape = read_step_file(sys.argv[1])
+
+#  display.DisplayShape(shape)
 
   slice(shape)
