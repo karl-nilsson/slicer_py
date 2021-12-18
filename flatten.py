@@ -61,7 +61,7 @@ def flatten_edge(edge: TopoDS_Edge) -> List:
 
   return []
 
-def flatten_curve(curve: Union[Geom2d_Curve, Geom2d_TrimmedCurve]) -> List[Geom2d_TrimmedCurve]:
+def flatten_curve(curve: Geom2d_Curve | Geom2d_TrimmedCurve) -> List[Geom2d_TrimmedCurve]:
   first = curve.FirstParameter()
   last = curve.LastParameter()
 
@@ -73,7 +73,7 @@ def flatten_curve(curve: Union[Geom2d_Curve, Geom2d_TrimmedCurve]) -> List[Geom2
       display.DisplayColoredShape(spline, 'BLUE')
       for pole in spline.Poles():
         display.DisplayColoredShape(pole, 'GREEN')
-      # flatten_curve(spline)
+      flatten_curve(spline)
     case GeomAbs_BSplineCurve.value:
       pass
     case GeomAbs_BezierCurve.value:
@@ -86,7 +86,7 @@ def flatten_curve(curve: Union[Geom2d_Curve, Geom2d_TrimmedCurve]) -> List[Geom2
 
 
 
-def flatten_wire(wire: TopoDS_Wire) -> List[Union[Geom2d_TrimmedCurve, Geom2d_Line]]:
+def flatten_wire(wire: TopoDS_Wire) -> List[Geom2d_TrimmedCurve | Geom2d_Line]:
   for edge in WireExplorer(wire).ordered_edges():
     flatten_edge(edge)
   
