@@ -47,7 +47,7 @@ def o(shape):
     return 'REVERSED'
   elif shape.Orientation() == TopAbs_INTERNAL:
     return 'INTERNAL'
-  elif shape.Orientation() == TopAbs_External:
+  elif shape.Orientation() == TopAbs_EXTERNAL:
     return 'EXTERNAL'
   
 
@@ -59,10 +59,7 @@ def on_select(shapes):
   s = shapes[0]
 
   if s.ShapeType() == TopAbs_EDGE:
-    if s.Orientation() == TopAbs_FORWARD:
-      print('FORWARD')
-    else:
-      print('REVERSED')
+    print(o(s))
 
     tmp = BRepAdaptor_Curve(s)
 
@@ -319,6 +316,6 @@ if __name__ == '__main__':
 
   shape = read_step_file(sys.argv[1])
 
-#  display.DisplayShape(shape)
+  #display.DisplayShape(shape)
 
   slice(shape)
