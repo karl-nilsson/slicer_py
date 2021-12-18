@@ -4,14 +4,30 @@
   // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
   "version": "0.2.0",
   "configurations": [
-
+    {
+      "name": "Python: hash test",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/hash_test.py",
+      "console": "integratedTerminal",
+      "args": ["res/cube.step"]
+    },
     {
       "name": "Python: Current File",
       "type": "python",
       "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: slicer",
+      "type": "python",
+      "request": "launch",
       "program": "${workspaceFolder}/slicer.py",
       "console": "integratedTerminal",
-      "args": ["res/text_test.step"]
+      "args": [
+        "res/hole.step"
+      ]
     }
   ]
 }
