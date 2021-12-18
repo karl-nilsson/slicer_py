@@ -18,4 +18,6 @@ OCCT's offset algorithm doesn't handle intersections
 ![](res/img/failure_2.png)
 
 ## TODO
+- Robust wire offsetting
 - Subdivide curves
+- clip infill pattern
