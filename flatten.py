@@ -7,7 +7,7 @@ import os
 import math
 from typing import *
 
-from OCC.Core import Geom, Standard
+from OCC.Core import Geom, GeomConvert, Standard
 from OCC.Core import Geom2dConvert
 
 from OCC.Core.BRep import BRep_Builder
@@ -37,11 +37,17 @@ from OCC.Core.Geom2d import *
 from OCC.Core.GeomAbs import *
 import OCC.Core.GeomAbs
 from OCC.Core.Geom2dConvert import *
+from OCC.Core.GeomConvert import * 
 from OCC.Core.Convert import *
 from OCC.Core.Geom2dAdaptor import *
 
 from OCC.Display.backend import get_qt_modules
 from OCC.Display.SimpleGui import init_display
+
+DEBUG = True
+
+# list of colors from pyocct
+colors = ['WHITE', 'BLUE',  'RED',  'GREEN',  'YELLOW', 'CYAN', 'BLACK', 'ORANGE']
 
 
 # initialize display
@@ -50,6 +56,26 @@ QtCore, QtGui, QtWidgets, QtOpengl = get_qt_modules()
 
 from OCC.Display.qtDisplay import qtViewer3d
 
+def flatten_bezier(curve: Geom2d_BezierCurve, tolerance: float = 0.1) -> List[Geom2d_TrimmedCurve]:
+
+  return []
+
+def flatten_bspline(curve: Geom2d_BSplineCurve, continuity_range: int = 3) -> List[Geom2d_TrimmedCurve]:
+  # https://dev.opencascade.org/content/bspline-arc
+  # split bspline
+  result = []
+  splits = Geom2dConvert_BSplineCurveKnotSplitting(curve, continuity_range)
+  for i in range(splits.NbSplits()):
+    z = splits.SplitValue(i)
+    print(z)
+    z = curve.Knot(splits.SplitValue(i))
+    print(z)
+    # subcurve = geom2dconvert_SplitBSplineCurve(curve, splits.SplitValue(i), splits.SplitValue(i+1))
+
+    # create circle
+    # result.append()
+
+  return result
 
 def flatten_edge(edge: TopoDS_Edge) -> List:
   print(f'Edge orientation: {edge.Orientation().name}')
@@ -70,14 +96,26 @@ def flatten_curve(curve: Geom2d_Curve | Geom2d_TrimmedCurve) -> List[Geom2d_Trim
   match adaptor_curve.GetType():
     case GeomAbs_Ellipse.value | GeomAbs_Parabola.value | GeomAbs_Hyperbola.value:
       spline = geom2dconvert_CurveToBSplineCurve(curve)
-      display.DisplayColoredShape(spline, 'BLUE')
-      for pole in spline.Poles():
-        display.DisplayColoredShape(pole, 'GREEN')
+      
+      if DEBUG:
+        display.DisplayColoredShape(spline, 'BLUE')
+        for pole in spline.Poles():
+          display.DisplayColoredShape(pole, 'GREEN')
+
       flatten_curve(spline)
     case GeomAbs_BSplineCurve.value:
-      pass
+      return flatten_bspline(curve)
+
+      #algo = Geom2dConvert_BSplineCurveToBezierCurve(curve)
+      #algo = GeomConvert_BSplineCurveToBezierCurve(curve)
+
+      # broken
+      # result: TColGeom2d_Array1OfBezierCurve = 0
+      # algo.Arcs(result)
+      # print(result)
+
     case GeomAbs_BezierCurve.value:
-      pass
+      return flatten_bezier(curve)
     case _:
       raise Exception(f'Invalid curve type: {adaptor_curve.GetType()}')
   
@@ -101,14 +139,18 @@ if __name__ == '__main__':
 
   display.DisplayColoredShape(e, 'RED')
 
-  flatten_curve(e)
+  e_flat = flatten_curve(e)
+
+  # display the new arcs
+  for i, c in enumerate(e_flat):
+    display.DisplayColoredShape(c, colors[i%len(colors)])
 
   p = Geom2d_Parabola(gp.OX2d(), 3.0)
   p = Geom2d_TrimmedCurve(p, -10, 10)
 
   display.DisplayColoredShape(p, 'RED')
 
-  flatten_curve(p)
+  p_flat = flatten_curve(p)
 
 
   display.FitAll()
