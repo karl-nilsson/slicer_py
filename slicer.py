@@ -41,6 +41,8 @@ QtCore, QtGui, QtWidgets, QtOpengl = get_qt_modules()
 from OCC.Display.qtDisplay import qtViewer3d
 
 def o(shape):
+  print(shape.Orientation())
+
   if shape.Orientation() == TopAbs_FORWARD:
     return 'FORWARD'
   elif shape.Orientation() == TopAbs_REVERSED:

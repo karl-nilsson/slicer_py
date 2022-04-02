@@ -51,7 +51,7 @@ colors = ['WHITE', 'BLUE',  'RED',  'GREEN',  'YELLOW', 'CYAN', 'BLACK', 'ORANGE
 
 
 # initialize display
-display, start_display, add_menu, add_function_to_menu = init_display("qt-pyqt5")
+display, start_display, add_menu, add_function_to_menu = init_display()
 QtCore, QtGui, QtWidgets, QtOpengl = get_qt_modules()
 
 from OCC.Display.qtDisplay import qtViewer3d
@@ -87,44 +87,47 @@ def flatten_edge(edge: TopoDS_Edge) -> List:
 
   return []
 
-def flatten_curve(curve: Geom2d_Curve | Geom2d_TrimmedCurve) -> List[Geom2d_TrimmedCurve]:
+def flatten_curve(curve: Union[Geom2d_Curve, Geom2d_TrimmedCurve]) -> List[Geom2d_TrimmedCurve]:
   first = curve.FirstParameter()
   last = curve.LastParameter()
 
   adaptor_curve = Geom2dAdaptor_Curve(curve)
 
-  match adaptor_curve.GetType():
-    case GeomAbs_Ellipse.value | GeomAbs_Parabola.value | GeomAbs_Hyperbola.value:
-      spline = geom2dconvert_CurveToBSplineCurve(curve)
-      
-      if DEBUG:
-        display.DisplayColoredShape(spline, 'BLUE')
-        for pole in spline.Poles():
-          display.DisplayColoredShape(pole, 'GREEN')
+  v = sys.version_info
 
-      flatten_curve(spline)
-    case GeomAbs_BSplineCurve.value:
-      return flatten_bspline(curve)
+  curve_type = adaptor_curve.GetType()
 
-      #algo = Geom2dConvert_BSplineCurveToBezierCurve(curve)
-      #algo = GeomConvert_BSplineCurveToBezierCurve(curve)
+  if curve_type == GeomAbs_Ellipse.value or curve_type == GeomAbs_Parabola.value or curve_type == GeomAbs_Hyperbola.value:
+    spline = geom2dconvert_CurveToBSplineCurve(curve)
+    
+    if DEBUG:
+      display.DisplayColoredShape(spline, 'BLUE')
+      for pole in spline.Poles():
+        display.DisplayColoredShape(pole, 'GREEN')
 
-      # broken
-      # result: TColGeom2d_Array1OfBezierCurve = 0
-      # algo.Arcs(result)
-      # print(result)
+    flatten_curve(spline)
 
-    case GeomAbs_BezierCurve.value:
-      return flatten_bezier(curve)
-    case _:
-      raise Exception(f'Invalid curve type: {adaptor_curve.GetType()}')
+  elif curve_type == GeomAbs_BSplineCurve.value:
+    return flatten_bspline(curve)
+
+    #algo = Geom2dConvert_BSplineCurveToBezierCurve(curve)
+    #algo = GeomConvert_BSplineCurveToBezierCurve(curve)
+
+    # broken
+    # result: TColGeom2d_Array1OfBezierCurve = 0
+    # algo.Arcs(result)
+    # print(result)
+  
+  elif curve_type == GeomAbs_BezierCurve.value:
+    return flatten_bezier(curve)
+  else:
+    raise Exception(f'Invalid curve type: {adaptor_curve.GetType()}')
   
 
   return []
 
 
-
-def flatten_wire(wire: TopoDS_Wire) -> List[Geom2d_TrimmedCurve | Geom2d_Line]:
+def flatten_wire(wire: TopoDS_Wire) -> List[Union[Geom2d_TrimmedCurve, Geom2d_Line]]:
   for edge in WireExplorer(wire).ordered_edges():
     flatten_edge(edge)
   
