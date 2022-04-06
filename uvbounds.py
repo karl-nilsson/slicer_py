@@ -28,6 +28,7 @@ display, start_display, add_menu, add_function_to_menu = init_display()
 
 
 def build_surf():
+    """Build surface"""
     p1 = gp_Pnt(-15, 200, 10)
     p2 = gp_Pnt(5, 204, 0)
     p3 = gp_Pnt(15, 200, 0)
