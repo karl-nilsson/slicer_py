@@ -32,7 +32,10 @@ display, start_display, add_menu, add_function_to_menu = init_display()
 
 
 def normals(face: TopoDS_Face, reverse = False):
-    surface = BRepAdaptor_Surface(face, True)
+    """Docstring"""
+    # surface = BRepAdaptor_Surface(face, True)
+
+    surface = BRep_Tool().Surface(face)
 
     # if surface.GetType() == GeomAbs_Plane:
     #     p = surface.Plane()
@@ -42,38 +45,49 @@ def normals(face: TopoDS_Face, reverse = False):
 
     #     return [(p.Location(), d)]
 
-    umin, umax, vmin, vmax = shapeanalysis_GetFaceUVBounds(surface)
+    u_min, u_max, v_min, v_max = shapeanalysis_GetFaceUVBounds(face)
 
     result = []
 
-    for i in range(umin, umax, (umax - umin) / 10):
-        for j in range(vmin, vmax, (vmax - vmin) / 10):
-            props = GeomLProp_SLProps(surface, i, j, 1, 1e-6)
-            
-            n = None
-            if props.IsNormalDefined:
-                n = props.Normal()
-                if reverse:
-                    n.Reverse()
+    u_count = v_count = 10
+    u_interval = (u_max - u_min) // u_count
+    v_interval = (v_max - v_min) // v_count
 
-            result += (props.Value(), n)
+    for i in range(u_count + 1):
+        u = u_min + i * u_interval
+
+        for j in range(v_count + 1):
+
+            v = v_min + j * v_interval
+
+            props = GeomLProp_SLProps(surface, u, v, 1, 1e-6)
+
+            normal = None
+            if props.IsNormalDefined():
+                normal = props.Normal()
+                if face.Orientation() == TopAbs_REVERSED:
+                    normal.Reverse()
+
+            result.append((props.Value(), normal))
+            display.DisplayShape(props.Value())
+
+    return result
 
 
-
-
-def exit(event=None):
-    sys.exit()
 
 
 if __name__ == "__main__":
     
-    shape = read_step_file('res/bridge_test.step')
+    shape = read_step_file('res/support_test.step')
 
     faces = TopologyExplorer(shape).faces()
 
     for f in faces:
         surface = BRepAdaptor_Surface(f, True)
-        normals(surface, f.Orientation == TopAbs_REVERSED)
+        normals(f, f.Orientation == TopAbs_REVERSED)
 
+    display.DisplayShape(shape, update=True)
+    
+    display.Repaint()
 
     start_display()
