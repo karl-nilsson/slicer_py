@@ -7,7 +7,6 @@
 		"context": "..",
 		"args": { 
 			"VARIANT": "3.10",
-			// Options
 			"NODE_VERSION": "none"
 		}
 	},
@@ -28,11 +27,11 @@
 		"python.linting.pylintPath": "/usr/local/py-utils/bin/pylint"
 	},
 
-//	    "-e", "QT_GRAPHICSSYSTEM=native",
 	"runArgs": [
 		"--net=host",
 		"--userns=keep-id",
 		"-e", "DISPLAY",
+		"-e", "QT_X11_NO_MITSHM=1",
 		"-v", "/tmp/.X11-unix:/tmp/.X11-unix:ro",
 		"-v", "/home/nilsson/.Xauthority:/home/vscode/.Xauthority:ro",
 		"--device", "/dev/dri",
