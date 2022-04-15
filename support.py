@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 
 import os
 import sys
@@ -23,6 +24,9 @@ from OCC.Core.gp import *
 from OCC.Core.BRepFill import BRepFill_Filling
 from OCC.Core.Graphic3d import Graphic3d_Structure
 
+from OCC.Core.BOPTools import BOPTools_AlgoTools3D
+from OCC.Core.IntTools import IntTools_Context
+
 from OCC.Extend.TopologyUtils import TopologyExplorer, WireExplorer
 from OCC.Extend.ShapeFactory import make_face, make_vertex
 from OCC.Extend.DataExchange import read_step_file
@@ -31,9 +35,11 @@ display, start_display, add_menu, add_function_to_menu = init_display()
 
 drawer = Prs3d_Drawer()
 
+face_normal_map: dict[TopoDS_Shape, list[tuple[gp_Pnt, gp_Dir]]] = {}
 
-def display_arrow(point: gp_Pnt, direction: gp_Dir):
-    """ displays arrow"""
+
+def display_arrow(point: gp_Pnt, direction: gp_Dir) -> None:
+    """displays arrow"""
 
     aStructure = Graphic3d_Structure(display._struc_mgr)
 
@@ -51,7 +57,7 @@ def display_arrow(point: gp_Pnt, direction: gp_Dir):
     return aStructure
 
 
-def normals(face: TopoDS_Face):
+def normals(face: TopoDS_Face) -> list[tuple[gp_Pnt, gp_Dir]]:
     """Docstring"""
     # surf = BRepAdaptor_Surface(face, True)
     surf = BRep_Tool().Surface(face)
@@ -64,6 +70,9 @@ def normals(face: TopoDS_Face):
 
     #     return [(p.Location(), d)]
 
+    # may not work, face may be mutable
+    face_normal_map[face] = []
+
     u_min, u_max, v_min, v_max = shapeanalysis_GetFaceUVBounds(face)
 
     result = []
@@ -73,6 +82,13 @@ def normals(face: TopoDS_Face):
     v_interval = (v_max - v_min) // v_count
 
     # need to filter for points inside of polygon
+    context = IntTools_Context()
+    # promising...
+    tmp = context.SurfaceData(face)
+
+    # for whatever reason, this calculates a different value than _getfaceUVbounds
+    # specifically, it doesn't return values <0
+    uu, uuu, vv, vvv = context.UVBounds(face)
 
     for i in range(u_count + 1):
         u = u_min + i * u_interval
@@ -83,6 +99,26 @@ def normals(face: TopoDS_Face):
 
             props = GeomLProp_SLProps(surf, u, v, 1, 1e-6)
 
+            # calculate 3d point on face
+            tmp = gp_Pnt2d() # dummy var
+            retval = BOPTools_AlgoTools3D.PointInFace(face, props.Value(), tmp, context)
+            # if failed, skip
+            if retval:
+                continue
+
+            # this returns false
+            r = context.IsPointInFace(props.Value(), face, 1e-6)
+            # if not r:
+            #     continue
+            # but this returns true
+            r = context.IsValidPointForFace(props.Value(), face, 1e-6)
+
+            if not r:
+                continue
+
+            n = gp_Dir()
+            # z = BOPTools_AlgoTools3D.GetNormalToSurface(surf, u, v, n)
+
             normal = None
             if props.IsNormalDefined():
                 normal = props.Normal()
@@ -92,28 +128,38 @@ def normals(face: TopoDS_Face):
             result.append((props.Value(), normal))
             # arrow = AIS_Line(Geom_Line(*result[-1]))
 
-            display_arrow(*result[-1])
+            # display_arrow(*result[-1])
 
-            # display.DisplayVector(normal, props.Value())
-
-            display.DisplayShape(props.Value())
+            # display.DisplayShape(props.Value())
 
     return result
 
+
+def selected(item: TopoDS_Shape):
+    """Selection callback"""
+    # display normals of selected face
+    if face_normal_map.get(item):
+        for n in face_normal_map[item]:
+            display_arrow(*n)
 
 
 
 if __name__ == "__main__":
     
     # shape = read_step_file('res/cylinder.step')
+    # shape = read_step_file('res/cylinder_weird.step')
     shape = read_step_file('res/support_test.step')
     # shape = read_step_file('res/text_test.step')
 
     faces = TopologyExplorer(shape).faces()
 
+    i = 0
+
     for f in faces:
-        surface = BRepAdaptor_Surface(f, True)
-        normals(f)
+        face_normal_map[f] = normals(f)
+        i += 1
+    
+    print(f"Number of faces: {i+1}")
 
     display.DisplayShape(shape, update=True)
     
